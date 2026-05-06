@@ -107,7 +107,7 @@ function loadImage(url) {
                     console.warn("Direct load failed, using proxy:", url);
 
                     const proxyUrl =
-                        "https://proxy.corsfix.com/?"
+                        "https://cors-proxy-ashy.vercel.app/proxy?url="
                         + url;
 
                     tryLoad(proxyUrl, true);
