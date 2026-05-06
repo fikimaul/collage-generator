@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Collage Generator (Client Side)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<div class="max-w-3xl mx-auto p-6 bg-white shadow-xl mt-10 rounded-2xl">
+
+    <h1 class="text-2xl font-bold mb-6 text-center">Collage Generator</h1>
+
+    <div class="grid grid-cols-2 gap-4">
+
+        <div>
+            <label>Rows</label>
+            <input type="number" id="rows" value="2" class="w-full border p-2 rounded">
+        </div>
+
+        <div>
+            <label>Cols</label>
+            <input type="number" id="cols" value="3" class="w-full border p-2 rounded">
+        </div>
+
+        <div>
+            <label>Ratio</label>
+            <select id="ratio" class="w-full border p-2 rounded">
+                <option value="1:1">1:1</option>
+                <option value="2:3">2:3</option>
+            </select>
+        </div>
+
+        <div>
+            <label>Tile Width</label>
+            <input type="number" id="tileWidth" value="300" class="w-full border p-2 rounded">
+        </div>
+
+        <div class="col-span-2">
+            <label>Fit Mode</label>
+            <select id="fit" class="w-full border p-2 rounded">
+                <option value="contain">Contain</option>
+                <option value="cover">Cover</option>
+                <option value="fill">Fill</option>
+            </select>
+        </div>
+
+    </div>
+
+    <div class="mt-4">
+        <label>Image URLs (1 per line)</label>
+        <textarea id="urls" class="w-full border p-2 rounded h-40"></textarea>
+    </div>
+
+    <button onclick="generate()" 
+        class="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg">
+        Generate
+    </button>
+
+    <div id="result" class="mt-6 text-center"></div>
+
+</div>
+
+<script>
+// ================= STORAGE =================
+const KEY = "collage_form";
+
+function save() {
+    localStorage.setItem(KEY, JSON.stringify({
+        rows: rows.value,
+        cols: cols.value,
+        ratio: ratio.value,
+        tileWidth: tileWidth.value,
+        fit: fit.value,
+        urls: urls.value
+    }));
+}
+
+function load() {
+    const data = JSON.parse(localStorage.getItem(KEY) || "{}");
+    rows.value = data.rows || 2;
+    cols.value = data.cols || 3;
+    ratio.value = data.ratio || "1:1";
+    tileWidth.value = data.tileWidth || 300;
+    fit.value = data.fit || "contain";
+    urls.value = data.urls || "";
+}
+
+["rows","cols","ratio","tileWidth","fit","urls"].forEach(id=>{
+    document.getElementById(id).addEventListener("input", save);
+});
+
+load();
+
+// ================= IMAGE LOAD =================
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+
+        function tryLoad(src,fallback = false) {
+            const img = new Image();
+
+            img.crossOrigin = "anonymous";
+            img.onload = () => resolve(img);
+            img.onerror = () => {
+
+                // 🔥 fallback ke proxy sekali saja
+                if (!fallback) {
+                    console.warn("Direct load failed, using proxy:", url);
+
+                    const proxyUrl =
+                        "https://proxy.corsfix.com/?"
+                        + url;
+
+                    tryLoad(proxyUrl, true);
+                    return;
+                }
+
+                reject(new Error("Failed load: " + url));
+            };
+
+            img.src = src;
+        }
+
+        // 🔥 coba direct dulu
+        tryLoad(url);
+
+    });
+}
+// ================= DRAW =================
+async function generate() {
+    save();
+
+    const ROWS = parseInt(rows.value);
+    const COLS = parseInt(cols.value);
+    const TOTAL = ROWS * COLS;
+
+    const list = urls.value.split("\n").map(x=>x.trim()).filter(Boolean);
+
+    const [rw, rh] = ratio.value.split(":").map(Number);
+    const tileW = parseInt(tileWidth.value);
+    const tileH = Math.round(tileW / (rw/rh));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = COLS * tileW;
+    canvas.height = ROWS * tileH;
+
+    const ctx = canvas.getContext("2d");
+
+    // background putih
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+    document.getElementById("result").innerHTML = "Processing...";
+
+    for (let i=0; i<TOTAL; i++) {
+        const row = Math.floor(i / COLS);
+        const col = i % COLS;
+
+        let x = col * tileW;
+        let y = row * tileH;
+
+        if (i < list.length) {
+            try {
+                const img = await loadImage(list[i]);
+
+                if (fit.value === "fill") {
+                    ctx.drawImage(img, x, y, tileW, tileH);
+                }
+
+                else if (fit.value === "contain") {
+                    const ratio = Math.min(tileW/img.width, tileH/img.height);
+                    const w = img.width * ratio;
+                    const h = img.height * ratio;
+
+                    const dx = x + (tileW - w)/2;
+                    const dy = y + (tileH - h)/2;
+
+                    ctx.drawImage(img, dx, dy, w, h);
+                }
+
+                else if (fit.value === "cover") {
+                    const ratio = Math.max(tileW/img.width, tileH/img.height);
+                    const w = img.width * ratio;
+                    const h = img.height * ratio;
+                    const isLandscape = img.width > img.height;
+                    
+                    if (isLandscape) {
+                        // Crop from left to show right side
+                        const cropX = (w - tileW) / ratio;
+                        const cropY = (h - tileH) / ratio / 2;
+                        ctx.drawImage(img, cropX, cropY, tileW/ratio, tileH/ratio, x, y, tileW, tileH);
+                    } else {
+                        // Center portrait images
+                        const dy = y + (tileH - h)/2;
+                        const dx = x + (tileW - w)/2;
+                        ctx.drawImage(img, dx, dy, w, h);
+                    }
+                }
+
+            } catch(e) {
+                console.warn("Failed load:", list[i]);
+            }
+        }
+    }
+
+    const url = canvas.toDataURL("image/jpeg", 0.95);
+
+    document.getElementById("result").innerHTML = `
+        <img src="${url}" class="mx-auto rounded shadow">
+        <br>
+        <a href="${url}" download="collage.jpg">
+            <button class="mt-4 bg-green-600 text-white px-4 py-2 rounded">
+                Download
+            </button>
+        </a>
+    `;
+}
+</script>
+
+</body>
+</html>
